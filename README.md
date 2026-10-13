@@ -252,3 +252,52 @@ test_system.py         系统检查脚本
 ## 注意
 
 本项目仅用于工程原型和演示，不替代医生面诊、诊断或治疗建议。高风险症状应及时就医。
+
+
+## 多角色 Agent 与桌面原型
+
+新增源码包含带原文证据的事实账本、Qwen 意图/Planner/Reviewer、请求权限校验、最多三次输出后的规则兜底，以及完整会话归档。完整消息追加到 JSONL，SQLite 维护线程索引、状态快照和请求终态；模型上下文与原始归档分开。
+
+Windows 桌面版需要已有 Python 工程及 `.venv`，目前是依赖工程目录的 L2 原型：
+
+```powershell
+cd desktop
+npm ci
+npm start -- --project .. --mode rule
+# vLLM 与抽取 LoRA 就绪后再选择模型模式：
+npm start -- --project .. --mode qwen-grounded
+```
+
+模型模式读取 `llm/semantic_roles.qwen_prototype.yaml`，默认访问 `http://127.0.0.1:8000`。需要服务端提供 `qwen3.5-4b` 基座及 `delivery-4b-full888` 抽取 LoRA；其他角色使用基座。权重、SSH 配置和 API key 由运行者自行配置，不随仓库分发。`scripts/serve_qwen35_4b_bf16.sh` 仅启动基座，抽取 LoRA 需另用 vLLM 的 LoRA 参数加载。
+
+## 可复用评测、训练与推理工具
+
+- `evaluation/harness.py`、事实/属性/操作指标及混合评分器：代码核对工程要求，离线 Judge 评价切题、清楚和文本依据，人工评分用于校准。评分 rubric 是程序运行输入，质量高分不能抵消安全或事实错误。
+- `training/semantic_lora_trainer.py`、`delivery_full_trainer.py`：LoRA/QLoRA、训练/验证隔离、数据签名、优化器边界检查点及断点恢复。GPU 环境需另装 PyTorch、Transformers、PEFT、Accelerate；QLoRA 还需兼容 CUDA 的 bitsandbytes。训练必须使用自己的已审核数据和匹配 release，不自动生成审批或虚构标签。
+- `training/teacher_data.py`、`semantic_teacher.py`：教师生成与校验的源码，默认不进行付费调用。实际生成前须准备事实卡、来源族登记和 holdout 保留记录；仓库不包含本地训练数据与审核记录。
+- `inference/benchmark_vllm.py`：固定负载的客户端流式测量，SSE 计时不能称为服务端 TTFT。
+- `inference/role_server_trace.py`、`server_timing_metrics.py`：以请求 ID 关联 ASGI 与引擎时间，计算服务端 TTFT、排队及请求平均 TPOT；缺失服务端记录时不使用客户端时钟补数。观察器依赖已验证的 vLLM 0.30.0 内部接口，其他版本须先核对接口。
+- `inference/sample_resources.py`、`modelscope_download_worker.py`：资源采样、国内 ModelScope 下载及文件 revision/SHA 校验。
+
+查看工具参数（不会启动训练或下载）：
+
+```powershell
+python -m training.semantic_lora_trainer --help
+python -m inference.benchmark_vllm --help
+python -m inference.modelscope_download_worker --help
+```
+
+无 API / GPU 的单元测试：
+
+```powershell
+python -m unittest discover -s llm -t . -p "test_*.py"
+python -m unittest discover -s memory -t . -p "test_*.py"
+python -m unittest discover -s agent -t . -p "test_*.py"
+python -m unittest discover -s evaluation -t . -p "test_*.py"
+python -m unittest discover -s training -t . -p "test_*.py"
+python -m unittest discover -s inference -t . -p "test_*.py"
+python -m unittest discover -s desktop -t . -p "test_*.py"
+node --test desktop/test_lifecycle.cjs desktop/test_ui.cjs desktop/test_recovery.cjs agent/test_chat_stream.cjs
+```
+
+公开仓库保留可运行的源码与测试；本地审核页面、计划/简历文档、生成数据、实验报告、检查点、模型权重和客户端二进制不纳入提交。已有 `docs/PROJECT_ARCHITECTURE.md` 与演示图片保持原有跟踪状态。当前系统是工程问诊原型，评测不是临床诊断准确率。
